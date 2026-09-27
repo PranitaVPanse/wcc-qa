@@ -1,0 +1,56 @@
+# Posts repository activity to the team's Slack channel: new pull requests, new issues, and
+# new comments on either. Messages go to a Slack incoming webhook stored as the
+# SLACK_WEBHOOK_URL repository secret; without it the job skips, so forks stay green.
+#
+# pull_request_target (not pull_request) so pull requests from forks can read the secret.
+# That is safe here because the job never checks out or runs the pull request's code — it only
+# reads the event payload. Titles and comment bodies are untrusted input, so they reach Slack
+# through jq and environment variables, never through ${{ }} interpolation into the shell.
+name: Slack notifications
+
+on:
+  pull_request_target:
+    types: [opened]
+  issues:
+    types: [opened]
+  issue_comment:
+    types: [created]
+
+permissions: {}
+
+jobs:
+  notify:
+    # Skip bots (e.g. Dependabot) to keep the channel readable.
+    if: github.event.sender.type != 'Bot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Post to Slack
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          if [ -z "$SLACK_WEBHOOK_URL" ]; then
+            echo "SLACK_WEBHOOK_URL is not set; skipping."
+            exit 0
+          fi
+
+          # Slack mrkdwn needs &, < and > escaped; the comment preview is cut to 200 characters.
+          text=$(jq -r '
+            def esc: gsub("&"; "&amp;") | gsub("<"; "&lt;") | gsub(">"; "&gt;");
+            .repository.full_name as $repo
+            | if .comment then
+                (if .issue.pull_request then "pull request" else "issue" end) as $kind
+                | (.comment.body // "") as $body
+                | ":speech_balloon: *New comment* on \($kind) <\(.comment.html_url)|#\(.issue.number) \(.issue.title | esc)> in `\($repo)`\n"
+                  + "*\(.comment.user.login)*: \($body | .[0:200] | esc)\(if ($body | length) > 200 then "…" else "" end)"
+              elif .pull_request then
+                ":twisted_rightwards_arrows: *New pull request* <\(.pull_request.html_url)|#\(.pull_request.number) \(.pull_request.title | esc)> in `\($repo)` by *\(.pull_request.user.login)*"
+              else
+                ":memo: *New issue* <\(.issue.html_url)|#\(.issue.number) \(.issue.title | esc)> in `\($repo)` by *\(.issue.user.login)*"
+              end
+          ' "$GITHUB_EVENT_PATH")
+
+          jq -n --arg text "$text" '{text: $text}' \
+            | curl --fail --silent --show-error -X POST \
+                -H 'Content-Type: application/json' --data @- "$SLACK_WEBHOOK_URL"
