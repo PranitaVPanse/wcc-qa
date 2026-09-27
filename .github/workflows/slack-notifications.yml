@@ -20,8 +20,6 @@ permissions: {}
 
 jobs:
   notify:
-    # Skip bots (e.g. Dependabot) to keep the channel readable.
-    if: github.event.sender.type != 'Bot'
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
