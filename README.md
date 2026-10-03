@@ -1,3 +1,5 @@
+Test line for Slack notifications
+
 # WCC QA
 
 Playwright + TypeScript test automation for the WCC platform. The suite is type-safe end to end: requests are built from Faker factories, responses are validated at runtime with Zod, and API calls go through a small client/service layer.
